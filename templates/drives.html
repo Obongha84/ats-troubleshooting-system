@@ -1,0 +1,663 @@
+{% extends "base.html" %}
+
+{% block title %}Drives - ATS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="fas fa-hdd"></i> Connected Drives</h1>
+    <p>All storage devices detected on this system &mdash; like HDD Sentinel, but better</p>
+</div>
+
+<div class="action-bar">
+    <button class="btn btn-primary" onclick="refreshDrives()">
+        <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+    <button class="btn btn-success" onclick="runFullScan()">
+        <i class="fas fa-play"></i> Run Full Scan
+    </button>
+</div>
+
+<!-- Health Score Card -->
+<div class="health-score-card" id="healthScoreCard">
+    <div class="health-score-header">
+        <h3><i class="fas fa-heartbeat"></i> Overall Health Score</h3>
+    </div>
+    <div class="health-score-body" id="healthScoreBody">
+        <div class="loading-spinner"></div>
+        <p>Loading health score...</p>
+    </div>
+</div>
+
+<!-- Drives Grid -->
+<div class="drives-grid" id="drivesGrid">
+    {% if drives %}
+        {% for drive in drives %}
+        <div class="drive-card drive-{{ drive.health_status.lower() }}">
+            <div class="drive-header">
+                <div class="drive-icon">
+                    {% if drive.drive_type == 'SSD' %}
+                        <i class="fas fa-microchip"></i>
+                    {% elif drive.drive_type == 'HDD' %}
+                        <i class="fas fa-hdd"></i>
+                    {% elif drive.drive_type == 'USB' %}
+                        <i class="fas fa-usb"></i>
+                    {% else %}
+                        <i class="fas fa-database"></i>
+                    {% endif %}
+                </div>
+                <div class="drive-title">
+                    <h3>{{ drive.drive_letter }}</h3>
+                    <span class="drive-type-badge type-{{ drive.drive_type.lower() }}">
+                        {{ drive.drive_type }}
+                    </span>
+                    {% if drive.is_system_drive %}
+                    <span class="system-badge">SYSTEM</span>
+                    {% endif %}
+                    {% if drive.is_removable %}
+                    <span class="removable-badge">REMOVABLE</span>
+                    {% endif %}
+                </div>
+                <div class="drive-status">
+                    <span class="status-badge {{ drive.health_status.lower() }}">
+                        {{ drive.health_status }}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="drive-name">{{ drive.drive_name }}</div>
+            <div class="drive-fs">File System: {{ drive.file_system }}</div>
+            
+            <div class="drive-metrics">
+                <div class="metric">
+                    <div class="metric-label">Total Size</div>
+                    <div class="metric-value">{{ "%.1f"|format(drive.total_size) }} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Used</div>
+                    <div class="metric-value">{{ "%.1f"|format(drive.used_size) }} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Free</div>
+                    <div class="metric-value">{{ "%.1f"|format(drive.free_size) }} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Temperature</div>
+                    <div class="metric-value">{{ "%.1f"|format(drive.temperature) }} &deg;C</div>
+                </div>
+            </div>
+            
+            <div class="usage-bar-container">
+                <div class="usage-label">
+                    <span>Usage</span>
+                    <span>{{ "%.1f"|format(drive.usage_percent) }}%</span>
+                </div>
+                <div class="usage-bar">
+                    <div class="usage-fill" style="width: {{ drive.usage_percent }}%; background: {% if drive.usage_percent > 85 %}#e74c3c{% elif drive.usage_percent > 70 %}#f39c12{% else %}#27ae60{% endif %};"></div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+    <div class="empty-state">
+        <i class="fas fa-hdd" style="font-size: 4em; color: #ccc;"></i>
+        <h3>No drives detected</h3>
+        <p>Run a diagnostic scan to detect all connected drives.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Auto-Repair Section -->
+<div class="repair-section">
+    <h3><i class="fas fa-tools"></i> Auto-Repair Actions</h3>
+    <p>Automatically clean temporary files, empty caches, and free up disk space.</p>
+    <div class="repair-actions">
+        <button class="btn btn-warning" onclick="runAutoRepair()">
+            <i class="fas fa-magic"></i> Run Auto-Repair
+        </button>
+        <button class="btn btn-primary" onclick="viewRepairLogs()">
+            <i class="fas fa-history"></i> View Repair Log
+        </button>
+    </div>
+    <div id="repairResults"></div>
+</div>
+
+<!-- Repair Log Modal -->
+<div class="modal-overlay" id="repairLogModal" onclick="closeRepairLog(event)">
+    <div class="modal-box" onclick="event.stopPropagation()">
+        <div class="modal-header">
+            <h3><i class="fas fa-history"></i> Repair Log</h3>
+            <button onclick="closeRepairLog()"><i class="fas fa-times"></i></button>
+        </div>
+        <div class="modal-body" id="repairLogBody">
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+</div>
+
+<style>
+.page-header {
+    margin-bottom: 25px;
+}
+.page-header h1 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+.page-header h1 i { color: var(--primary); }
+.page-header p { color: #666; margin-top: 6px; }
+
+.action-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 25px;
+    flex-wrap: wrap;
+}
+
+/* Health Score Card */
+.health-score-card {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: white;
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 30px;
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+.health-score-header h3 {
+    color: white;
+    margin: 0 0 15px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.health-score-body {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+    flex-wrap: wrap;
+}
+.score-circle {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5em;
+    font-weight: bold;
+    border: 4px solid rgba(255,255,255,0.3);
+    flex-shrink: 0;
+}
+.score-circle.excellent { border-color: #2ecc71; background: rgba(46, 204, 113, 0.2); }
+.score-circle.good { border-color: #f1c40f; background: rgba(241, 196, 15, 0.2); }
+.score-circle.poor { border-color: #e67e22; background: rgba(230, 126, 34, 0.2); }
+.score-circle.critical { border-color: #e74c3c; background: rgba(231, 76, 60, 0.2); }
+.score-info { flex: 1; min-width: 200px; }
+.score-info h2 { margin: 0 0 8px 0; color: white; }
+.score-info p { margin: 0; opacity: 0.9; font-size: 0.95em; }
+
+/* Drives Grid */
+.drives-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.drive-card {
+    background: var(--card-bg);
+    border-radius: 15px;
+    padding: 22px;
+    border-top: 5px solid var(--primary);
+    transition: all 0.3s;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+}
+.drive-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+}
+.drive-card.drive-good { border-top-color: #27ae60; }
+.drive-card.drive-warning { border-top-color: #f39c12; }
+.drive-card.drive-critical { border-top-color: #e74c3c; }
+
+.drive-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+.drive-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: 12px;
+    background: rgba(102, 126, 234, 0.15);
+    color: var(--primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5em;
+    flex-shrink: 0;
+}
+.drive-title { flex: 1; }
+.drive-title h3 {
+    margin: 0 0 5px 0;
+    font-size: 1.4em;
+    color: var(--text-color);
+}
+.drive-type-badge,
+.system-badge,
+.removable-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 0.7em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    margin-right: 5px;
+}
+.drive-type-badge.type-ssd { background: #3498db; color: white; }
+.drive-type-badge.type-hdd { background: #9b59b6; color: white; }
+.drive-type-badge.type-usb { background: #e67e22; color: white; }
+.drive-type-badge.type-removable { background: #95a5a6; color: white; }
+.drive-type-badge.type-unknown { background: #bdc3c7; color: #333; }
+.system-badge { background: var(--primary); color: white; }
+.removable-badge { background: #f39c12; color: white; }
+
+.drive-name {
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 4px;
+    font-size: 0.95em;
+}
+.drive-fs {
+    color: #666;
+    font-size: 0.85em;
+    margin-bottom: 15px;
+}
+
+.drive-metrics {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-bottom: 15px;
+}
+.metric {
+    background: var(--bg-color);
+    padding: 10px;
+    border-radius: 8px;
+}
+.metric-label {
+    font-size: 0.75em;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.metric-value {
+    font-size: 1.1em;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-top: 3px;
+}
+
+.usage-bar-container { margin-top: 10px; }
+.usage-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85em;
+    color: #666;
+    margin-bottom: 6px;
+}
+.usage-bar {
+    height: 10px;
+    background: #e9ecef;
+    border-radius: 5px;
+    overflow: hidden;
+}
+.usage-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.5s ease;
+}
+
+/* Repair Section */
+.repair-section {
+    background: var(--card-bg);
+    border-radius: 15px;
+    padding: 25px;
+    margin-top: 30px;
+    border-left: 4px solid #f39c12;
+}
+.repair-section h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+.repair-section h3 i { color: #f39c12; }
+.repair-section p { color: #666; margin-bottom: 15px; }
+.repair-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+#repairResults {
+    margin-top: 20px;
+}
+.repair-action-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-color);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    border-left: 4px solid #27ae60;
+}
+.repair-action-item.failed { border-left-color: #e74c3c; }
+.repair-action-item .action-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.repair-action-item.failed .action-icon {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+.repair-action-item .action-info { flex: 1; }
+.repair-action-item .action-name {
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 3px;
+}
+.repair-action-item .action-desc {
+    color: #666;
+    font-size: 0.85em;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+    background: var(--bg-color);
+    border-radius: 15px;
+    max-width: 700px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.modal-header {
+    background: var(--primary);
+    color: white;
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.modal-header h3 { color: white; margin: 0; }
+.modal-header button {
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 1.2em;
+    cursor: pointer;
+}
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+}
+
+@media (max-width: 600px) {
+    .drives-grid { grid-template-columns: 1fr; }
+    .drive-metrics { grid-template-columns: 1fr; }
+    .score-circle { width: 90px; height: 90px; font-size: 2em; }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// ========== HEALTH SCORE ==========
+function loadHealthScore() {
+    const body = document.getElementById('healthScoreBody');
+    
+    fetch('/api/health_score')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success || data.score === null) {
+                body.innerHTML = '<p>No diagnosis yet. Run a scan to calculate your health score.</p>';
+                return;
+            }
+            
+            const score = data.score;
+            let grade, gradeClass, desc;
+            
+            if (score >= 90) { grade = 'Excellent'; gradeClass = 'excellent'; desc = 'Your system is in great shape!'; }
+            else if (score >= 70) { grade = 'Good'; gradeClass = 'good'; desc = 'Minor issues detected. Monitor closely.'; }
+            else if (score >= 50) { grade = 'Fair'; gradeClass = 'poor'; desc = 'Several issues need attention.'; }
+            else { grade = 'Poor'; gradeClass = 'critical'; desc = 'Critical issues. Take action now!'; }
+            
+            body.innerHTML = `
+                <div class="score-circle ${gradeClass}">${score}</div>
+                <div class="score-info">
+                    <h2>${grade}</h2>
+                    <p>${desc}</p>
+                    <p style="margin-top: 8px; font-size: 0.85em; opacity: 0.8;">
+                        Based on diagnosis #${data.diagnosis_id} from ${data.timestamp}
+                    </p>
+                </div>
+            `;
+        })
+        .catch(err => {
+            body.innerHTML = '<p>Could not load health score.</p>';
+        });
+}
+
+// ========== REFRESH DRIVES (LIVE DETECT) ==========
+function refreshDrives() {
+    showToast('Scanning for connected drives...', 'info', 2000);
+    
+    fetch('/api/drives/detect')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                renderDrives(data.drives);
+                showToast(`Detected ${data.drives.length} drive(s)`, 'success');
+            } else {
+                showToast('Failed to detect drives', 'error');
+            }
+        });
+}
+
+function renderDrives(drives) {
+    const grid = document.getElementById('drivesGrid');
+    
+    if (!drives || drives.length === 0) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-hdd" style="font-size: 4em; color: #ccc;"></i>
+                <h3>No drives detected</h3>
+                <p>Try running a scan or checking your connections.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    grid.innerHTML = drives.map(d => `
+        <div class="drive-card drive-${(d.health_status || 'good').toLowerCase()}">
+            <div class="drive-header">
+                <div class="drive-icon">
+                    <i class="fas ${
+                        d.drive_type === 'SSD' ? 'fa-microchip' :
+                        d.drive_type === 'HDD' ? 'fa-hdd' :
+                        d.drive_type === 'USB' ? 'fa-usb' : 'fa-database'
+                    }"></i>
+                </div>
+                <div class="drive-title">
+                    <h3>${d.drive_letter}</h3>
+                    <span class="drive-type-badge type-${(d.drive_type || 'unknown').toLowerCase()}">${d.drive_type}</span>
+                    ${d.is_system_drive ? '<span class="system-badge">SYSTEM</span>' : ''}
+                    ${d.is_removable ? '<span class="removable-badge">REMOVABLE</span>' : ''}
+                </div>
+                <div class="drive-status">
+                    <span class="status-badge ${(d.health_status || 'good').toLowerCase()}">${d.health_status}</span>
+                </div>
+            </div>
+            <div class="drive-name">${d.drive_name}</div>
+            <div class="drive-fs">File System: ${d.file_system}</div>
+            <div class="drive-metrics">
+                <div class="metric">
+                    <div class="metric-label">Total Size</div>
+                    <div class="metric-value">${d.total_size} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Used</div>
+                    <div class="metric-value">${d.used_size} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Free</div>
+                    <div class="metric-value">${d.free_size} GB</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Temperature</div>
+                    <div class="metric-value">${d.temperature}°C</div>
+                </div>
+            </div>
+            <div class="usage-bar-container">
+                <div class="usage-label">
+                    <span>Usage</span>
+                    <span>${d.usage_percent}%</span>
+                </div>
+                <div class="usage-bar">
+                    <div class="usage-fill" style="width: ${d.usage_percent}%; background: ${
+                        d.usage_percent > 85 ? '#e74c3c' : d.usage_percent > 70 ? '#f39c12' : '#27ae60'
+                    };"></div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ========== AUTO-REPAIR ==========
+function runAutoRepair() {
+    if (!confirm('Run auto-repair? This will clean temporary files and empty caches.')) return;
+    
+    showToast('Running auto-repair...', 'info');
+    
+    fetch('/api/auto_repair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        const results = document.getElementById('repairResults');
+        
+        if (data.success) {
+            const actionsHtml = data.actions.map(a => `
+                <div class="repair-action-item ${a.success ? '' : 'failed'}">
+                    <div class="action-icon">
+                        <i class="fas ${a.success ? 'fa-check' : 'fa-times'}"></i>
+                    </div>
+                    <div class="action-info">
+                        <div class="action-name">${a.name}</div>
+                        <div class="action-desc">${a.description}</div>
+                    </div>
+                </div>
+            `).join('');
+            
+            results.innerHTML = `
+                <div style="margin-top: 15px; padding: 15px; background: rgba(39,174,96,0.1); border-radius: 10px; margin-bottom: 15px;">
+                    <strong style="color: #27ae60;">
+                        <i class="fas fa-check-circle"></i>
+                        Repair complete! Freed ${data.total_freed_formatted}
+                    </strong>
+                </div>
+                ${actionsHtml}
+            `;
+            
+            showToast(`Freed ${data.total_freed_formatted}!`, 'success');
+        } else {
+            showToast('Repair failed: ' + data.error, 'error');
+        }
+    })
+    .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+// ========== VIEW REPAIR LOGS ==========
+function viewRepairLogs() {
+    const modal = document.getElementById('repairLogModal');
+    const body = document.getElementById('repairLogBody');
+    modal.classList.add('open');
+    body.innerHTML = '<div class="loading-spinner"></div>';
+    
+    fetch('/api/repair_logs')
+        .then(r => r.json())
+        .then(data => {
+            if (data.success && data.logs.length > 0) {
+                body.innerHTML = data.logs.map(log => `
+                    <div class="repair-action-item ${log.success ? '' : 'failed'}" style="margin-bottom: 10px;">
+                        <div class="action-icon">
+                            <i class="fas ${log.success ? 'fa-check' : 'fa-times'}"></i>
+                        </div>
+                        <div class="action-info">
+                            <div class="action-name">${log.action}</div>
+                            <div class="action-desc">${log.description}</div>
+                            <div class="action-desc" style="font-size: 0.75em; margin-top: 4px; color: #999;">
+                                ${log.timestamp}
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                body.innerHTML = '<p style="text-align:center; color:#999;">No repair actions logged yet.</p>';
+            }
+        });
+}
+
+function closeRepairLog(event) {
+    if (event) event.stopPropagation();
+    document.getElementById('repairLogModal').classList.remove('open');
+}
+
+// ========== FULL SCAN ==========
+function runFullScan() {
+    showToast('Starting full diagnostic scan...', 'info');
+    
+    fetch('/api/run_diagnostics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Scan complete! Refreshing...', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            showToast('Scan failed: ' + data.error, 'error');
+        }
+    });
+}
+
+// ========== INIT ==========
+document.addEventListener('DOMContentLoaded', function() {
+    loadHealthScore();
+});
+</script>
+{% endblock %}

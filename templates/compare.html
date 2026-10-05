@@ -1,0 +1,245 @@
+{% extends "base.html" %}
+
+{% block title %}Compare Diagnoses - ATS{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1><i class="fas fa-balance-scale"></i> Compare Diagnoses</h1>
+    <p>See what changed between two diagnostic scans</p>
+</div>
+
+<div class="compare-selector">
+    <div class="select-group">
+        <label>First Diagnosis (Older)</label>
+        <select id="diag1">
+            <option value="">-- Select --</option>
+            {% for d in diagnoses %}
+            <option value="{{ d.id }}">
+                #{{ d.id }} - {{ d.timestamp.strftime('%Y-%m-%d %H:%M') }} - {{ d.system_status }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <div class="compare-arrow">
+        <i class="fas fa-arrow-right"></i>
+    </div>
+    
+    <div class="select-group">
+        <label>Second Diagnosis (Newer)</label>
+        <select id="diag2">
+            <option value="">-- Select --</option>
+            {% for d in diagnoses %}
+            <option value="{{ d.id }}">
+                #{{ d.id }} - {{ d.timestamp.strftime('%Y-%m-%d %H:%M') }} - {{ d.system_status }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+    
+    <button class="btn btn-primary" onclick="compareDiagnoses()">
+        <i class="fas fa-balance-scale"></i> Compare
+    </button>
+</div>
+
+<div id="compareResults"></div>
+
+<style>
+.page-header { margin-bottom: 30px; }
+.page-header h1 { display: flex; align-items: center; gap: 12px; }
+.page-header h1 i { color: var(--primary); }
+
+.compare-selector {
+    display: flex;
+    gap: 20px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    background: var(--card-bg);
+    padding: 25px;
+    border-radius: 15px;
+    margin-bottom: 30px;
+}
+.select-group { flex: 1; min-width: 250px; }
+.select-group label {
+    display: block;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+.select-group select {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 14px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    cursor: pointer;
+}
+.compare-arrow {
+    font-size: 1.5em;
+    color: var(--primary);
+    padding: 0 10px;
+}
+
+/* Result Cards */
+.compare-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+.summary-card {
+    background: var(--card-bg);
+    padding: 20px;
+    border-radius: 12px;
+    border-left: 4px solid var(--primary);
+}
+.summary-card.status-improved { border-left-color: #27ae60; }
+.summary-card.status-worsened { border-left-color: #e74c3c; }
+.summary-card.status-same { border-left-color: #f39c12; }
+
+.summary-label { font-size: 0.85em; color: #666; text-transform: uppercase; }
+.summary-value { font-size: 1.3em; font-weight: bold; color: var(--text-color); margin-top: 6px; }
+
+.compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card-bg);
+    border-radius: 12px;
+    overflow: hidden;
+}
+.compare-table th {
+    background: rgba(102, 126, 234, 0.1);
+    padding: 15px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-color);
+}
+.compare-table td {
+    padding: 15px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+.compare-table tr:last-child td { border-bottom: none; }
+
+.change-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    font-weight: 600;
+}
+.change-badge.better { background: #d4edda; color: #155724; }
+.change-badge.worse { background: #f8d7da; color: #721c24; }
+.change-badge.same { background: #e9ecef; color: #495057; }
+
+@media (max-width: 600px) {
+    .compare-arrow { transform: rotate(90deg); }
+    .compare-table { font-size: 0.85em; }
+    .compare-table th, .compare-table td { padding: 10px 8px; }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function compareDiagnoses() {
+    const id1 = document.getElementById('diag1').value;
+    const id2 = document.getElementById('diag2').value;
+    
+    if (!id1 || !id2) {
+        showToast('Please select both diagnoses', 'warning');
+        return;
+    }
+    
+    if (id1 === id2) {
+        showToast('Please select two different diagnoses', 'warning');
+        return;
+    }
+    
+    document.getElementById('compareResults').innerHTML = '<div class="loading-spinner"></div>';
+    
+    fetch(`/api/compare/${id1}/${id2}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                showToast(data.error, 'error');
+                return;
+            }
+            
+            const sc = data.status_change;
+            const statusClass = sc.change === 'better' ? 'status-improved' : 
+                                sc.change === 'worse' ? 'status-worsened' : 'status-same';
+            
+            const comparisonsHtml = data.comparisons.map(c => {
+                const arrow = c.change === 'better' ? '↓' : c.change === 'worse' ? '↑' : '=';
+                const badgeClass = c.change === 'better' ? 'better' : 
+                                   c.change === 'worse' ? 'worse' : 'same';
+                
+                return `
+                    <tr>
+                        <td><strong>${c.name}</strong></td>
+                        <td>${c.value1}${c.unit}</td>
+                        <td>${c.value2}${c.unit}</td>
+                        <td>
+                            <span class="change-badge ${badgeClass}">
+                                ${arrow} ${Math.abs(c.difference)}${c.unit} (${Math.abs(c.percent)}%)
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+            
+            document.getElementById('compareResults').innerHTML = `
+                <div class="compare-summary">
+                    <div class="summary-card">
+                        <div class="summary-label">First Scan</div>
+                        <div class="summary-value">#${data.diagnosis1.id}</div>
+                        <div style="color: #666; font-size: 0.85em; margin-top: 4px;">
+                            ${data.diagnosis1.timestamp}
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-label">Second Scan</div>
+                        <div class="summary-value">#${data.diagnosis2.id}</div>
+                        <div style="color: #666; font-size: 0.85em; margin-top: 4px;">
+                            ${data.diagnosis2.timestamp}
+                        </div>
+                    </div>
+                    <div class="summary-card ${statusClass}">
+                        <div class="summary-label">Status Change</div>
+                        <div class="summary-value">
+                            ${sc.from} → ${sc.to}
+                        </div>
+                        <div style="font-size: 0.9em; margin-top: 4px; color: #666;">
+                            ${sc.change === 'better' ? 'Improvement' : 
+                              sc.change === 'worse' ? 'Degradation' : 'No change'}
+                        </div>
+                    </div>
+                </div>
+                
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>First Scan</th>
+                            <th>Second Scan</th>
+                            <th>Change</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${comparisonsHtml}
+                    </tbody>
+                </table>
+            `;
+        })
+        .catch(err => {
+            showToast('Error: ' + err.message, 'error');
+        });
+}
+</script>
+{% endblock %}

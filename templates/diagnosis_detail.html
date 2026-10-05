@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+
+{% block title %}Diagnosis #{{ diagnosis.id }} - Troubleshooting System{% endblock %}
+
+{% block content %}
+<div class="nav-links">
+    <a href="/">🏠 Home</a>
+    <a href="/dashboard">📊 Dashboard</a>
+    <a href="/history">📋 History</a>
+</div>
+
+<div class="header">
+    <div>
+        <h1>🔍 Diagnosis #{{ diagnosis.id }}</h1>
+        <div class="timestamp">{{ diagnosis.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+    </div>
+    <div class="btn-group">
+        <span class="status-badge {{ diagnosis.system_status.lower() }}">
+            {{ diagnosis.system_status }}
+        </span>
+        <a href="/history" class="btn btn-primary">⬅️ Back</a>
+    </div>
+</div>
+
+<div class="info-grid">
+    <div class="info-item">
+        <div class="label">💻 CPU Usage</div>
+        <div class="value">{{ "%.1f"|format(diagnosis.cpu_usage) }}%</div>
+    </div>
+    <div class="info-item">
+        <div class="label">🧠 Memory Usage</div>
+        <div class="value">{{ "%.1f"|format(diagnosis.memory_usage) }}%</div>
+    </div>
+    <div class="info-item">
+        <div class="label">💾 Disk Usage</div>
+        <div class="value">{{ "%.1f"|format(diagnosis.disk_usage) }}%</div>
+    </div>
+    <div class="info-item">
+        <div class="label">🌐 Network Status</div>
+        <div class="value">{{ diagnosis.network_status }}</div>
+    </div>
+    <div class="info-item">
+        <div class="label">⚠️ Issues Found</div>
+        <div class="value" style="color: {{ 'red' if diagnosis.issues_found > 0 else 'green' }};">
+            {{ diagnosis.issues_found }}
+        </div>
+    </div>
+    <div class="info-item">
+        <div class="label">✅ Issues Fixed</div>
+        <div class="value" style="color: #27ae60;">
+            {{ diagnosis.issues_fixed }}
+        </div>
+    </div>
+</div>
+
+{% if checks %}
+<div class="checks-section">
+    <h3>📊 System Checks</h3>
+    {% for check in checks %}
+    <div class="check-item">
+        <span class="check-name">{{ check.name }}</span>
+        <span class="check-status {{ check.status.lower() }}">{{ check.status }}</span>
+        <span class="check-message">{{ check.message }}</span>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if recommendations %}
+<div class="recommendations">
+    <h3>💡 Recommendations</h3>
+    <ul>
+        {% for rec in recommendations %}
+        <li>{{ rec }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="notes-section">
+    <h3>📝 User Notes</h3>
+    <textarea id="notes" placeholder="Add notes about this diagnosis...">{{ diagnosis.user_notes or '' }}</textarea>
+    <button class="btn btn-primary btn-save" onclick="saveNotes()">💾 Save Notes</button>
+    <div id="saveMessage">✅ Notes saved successfully!</div>
+</div>
+
+<div class="export-section">
+    <h3>📤 Export Results</h3>
+    <div class="export-buttons">
+        <button onclick="exportPDF({{ diagnosis.id }})" class="btn btn-primary">
+            📄 Export as PDF
+        </button>
+        <a href="/export/csv" class="btn btn-success">
+            📊 Export All as CSV
+        </a>
+        <button onclick="window.print()" class="btn btn-warning">
+            🖨️ Print
+        </button>
+    </div>
+</div>
+
+<style>
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.header h1 { color: var(--text-color); }
+
+.timestamp { color: #666; font-size: 0.9em; }
+
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin: 20px 0 30px 0;
+}
+
+.info-item {
+    background: var(--card-bg);
+    padding: 15px;
+    border-radius: 10px;
+}
+
+.info-item .label { font-size: 0.85em; color: #666; }
+.info-item .value { font-size: 1.2em; font-weight: 600; color: var(--text-color); margin-top: 5px; }
+
+.checks-section { margin: 30px 0; }
+.checks-section h3 { color: var(--text-color); margin-bottom: 15px; }
+
+.check-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.check-item:last-child { border-bottom: none; }
+.check-item .check-name { font-weight: 500; color: var(--text-color); min-width: 150px; }
+
+.check-status {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.check-status.pass { background: #d4edda; color: #155724; }
+.check-status.warning { background: #fff3cd; color: #856404; }
+.check-status.fail { background: #f8d7da; color: #721c24; }
+
+.check-item .check-message { color: #666; font-size: 0.9em; flex: 1; min-width: 150px; }
+
+.recommendations {
+    background: #e8f4fd;
+    padding: 20px;
+    border-radius: 10px;
+    margin: 20px 0;
+    border-left: 4px solid var(--primary);
+}
+
+.recommendations h3 { color: #333; margin-bottom: 10px; }
+.recommendations ul { list-style-type: none; padding: 0; }
+.recommendations li {
+    padding: 8px 0;
+    padding-left: 25px;
+    position: relative;
+    color: #333;
+}
+.recommendations li:before { content: "💡"; position: absolute; left: 0; }
+
+.notes-section {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid var(--border-color);
+}
+
+.notes-section textarea {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    resize: vertical;
+    min-height: 100px;
+    margin-top: 10px;
+    background: var(--card-bg);
+    color: var(--text-color);
+}
+
+.notes-section textarea:focus { outline: none; border-color: var(--primary); }
+
+.btn-save { margin-top: 10px; }
+
+#saveMessage {
+    margin-top: 10px;
+    color: #27ae60;
+    display: none;
+    font-weight: 500;
+}
+
+.export-section {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid var(--border-color);
+}
+
+.export-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+
+.btn-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+@media (max-width: 600px) {
+    .header { flex-direction: column; align-items: stretch; }
+    .info-grid { grid-template-columns: 1fr; }
+    .check-item { flex-direction: column; align-items: stretch; }
+    .export-buttons { flex-direction: column; }
+}
+</style>
+
+<script>
+function saveNotes() {
+    const notes = document.getElementById('notes').value;
+    const diagnosisId = {{ diagnosis.id }};
+    
+    fetch('/api/diagnosis/' + diagnosisId + '/notes', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: notes })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            const msg = document.getElementById('saveMessage');
+            msg.style.display = 'block';
+            showToast('✅ Notes saved successfully!', 'success');
+            setTimeout(() => { msg.style.display = 'none'; }, 3000);
+        } else {
+            showToast('❌ Error saving notes: ' + data.error, 'error');
+        }
+    })
+    .catch(error => showToast('❌ Error: ' + error.message, 'error'));
+}
+
+function exportPDF(id) {
+    showToast('📄 Generating PDF...', 'info');
+    window.open('/export/pdf/' + id, '_blank');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,400 @@
+{% extends "base.html" %}
+
+{% block title %}History - ATS{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <h1><i class="fas fa-clipboard-list"></i> Diagnosis History</h1>
+    <p style="color: #666; margin-top: 5px;">
+        Complete record of all your system diagnostic scans
+    </p>
+</div>
+
+<!-- Action Buttons -->
+<div class="action-bar">
+    <button class="btn btn-success btn-sm" onclick="generateSampleData()">
+        <i class="fas fa-plus"></i> Generate Sample
+    </button>
+    <button class="btn btn-danger btn-sm" onclick="clearAllHistory()">
+        <i class="fas fa-trash"></i> Clear All
+    </button>
+    <a href="/export/csv" class="btn btn-warning btn-sm">
+        <i class="fas fa-file-csv"></i> Export CSV
+    </a>
+</div>
+
+<!-- Stats Grid -->
+<div class="stats-grid">
+    <div class="stat-card total">
+        <div class="stat-icon"><i class="fas fa-chart-bar"></i></div>
+        <div class="stat-number">{{ stats.total }}</div>
+        <div class="stat-label">Total Diagnoses</div>
+    </div>
+    <div class="stat-card healthy">
+        <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+        <div class="stat-number">{{ stats.healthy }}</div>
+        <div class="stat-label">Healthy</div>
+    </div>
+    <div class="stat-card warning">
+        <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
+        <div class="stat-number">{{ stats.warning }}</div>
+        <div class="stat-label">Warnings</div>
+    </div>
+    <div class="stat-card critical">
+        <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
+        <div class="stat-number">{{ stats.critical }}</div>
+        <div class="stat-label">Critical</div>
+    </div>
+</div>
+
+<!-- Search & Filter -->
+<div class="search-section">
+    <div class="search-input-wrapper">
+        <i class="fas fa-search"></i>
+        <input type="text" id="searchInput" placeholder="Search by ID or Status..." onkeyup="filterTable()">
+    </div>
+    <select id="statusFilter" onchange="filterTable()">
+        <option value="all">All Status</option>
+        <option value="healthy">Healthy</option>
+        <option value="warning">Warning</option>
+        <option value="critical">Critical</option>
+    </select>
+    <select id="dateFilter" onchange="filterTable()">
+        <option value="all">All Time</option>
+        <option value="today">Today</option>
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+    </select>
+</div>
+
+<!-- Table -->
+<div class="table-container">
+    {% if diagnoses %}
+    <table id="diagnosisTable">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Date &amp; Time</th>
+                <th>Status</th>
+                <th>CPU</th>
+                <th>Memory</th>
+                <th>Issues</th>
+                <th>Fixed</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for diagnosis in diagnoses %}
+            <tr>
+                <td><strong>#{{ diagnosis.id }}</strong></td>
+                <td class="date-cell">{{ diagnosis.timestamp.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    <span class="status-badge {{ diagnosis.system_status.lower() }}">
+                        {{ diagnosis.system_status }}
+                    </span>
+                </td>
+                <td>{{ "%.1f"|format(diagnosis.cpu_usage) }}%</td>
+                <td>{{ "%.1f"|format(diagnosis.memory_usage) }}%</td>
+                <td>{{ diagnosis.issues_found }}</td>
+                <td>{{ diagnosis.issues_fixed }}</td>
+                <td>
+                    <div class="action-buttons">
+                        <a href="/diagnosis/{{ diagnosis.id }}" class="btn btn-primary btn-sm">
+                            <i class="fas fa-eye"></i> View
+                        </a>
+                        <button onclick="deleteDiagnosis({{ diagnosis.id }})" class="btn btn-danger btn-sm">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon"><i class="fas fa-search"></i></div>
+        <h3>No diagnoses yet</h3>
+        <p>Run a diagnostic scan to start building your history.</p>
+        <a href="/" class="btn btn-primary" style="margin-top: 15px;">
+            <i class="fas fa-play"></i> Run Diagnostics
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.action-bar {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 25px;
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 15px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background: var(--card-bg);
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    border-top: 4px solid var(--primary);
+    transition: all 0.3s;
+}
+
+.stat-card:hover { transform: translateY(-3px); box-shadow: 0 5px 20px rgba(0,0,0,0.08); }
+
+.stat-card .stat-icon {
+    font-size: 1.8em;
+    margin-bottom: 8px;
+    color: var(--primary);
+}
+
+.stat-card.healthy { border-top-color: #27ae60; }
+.stat-card.healthy .stat-icon { color: #27ae60; }
+.stat-card.healthy .stat-number { color: #27ae60; }
+
+.stat-card.warning { border-top-color: #f39c12; }
+.stat-card.warning .stat-icon { color: #f39c12; }
+.stat-card.warning .stat-number { color: #f39c12; }
+
+.stat-card.critical { border-top-color: #e74c3c; }
+.stat-card.critical .stat-icon { color: #e74c3c; }
+.stat-card.critical .stat-number { color: #e74c3c; }
+
+.stat-card.total .stat-number { color: var(--primary); }
+
+.stat-card .stat-number {
+    font-size: 1.9em;
+    font-weight: bold;
+    color: var(--text-color);
+    margin-bottom: 4px;
+}
+
+.stat-card .stat-label {
+    font-size: 0.82em;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.search-section {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.search-input-wrapper {
+    position: relative;
+    flex: 1;
+    min-width: 220px;
+}
+
+.search-input-wrapper i {
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #999;
+    pointer-events: none;
+}
+
+.search-section input,
+.search-section select {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 14px;
+    background: var(--card-bg);
+    color: var(--text-color);
+    transition: border-color 0.3s;
+}
+
+.search-input-wrapper input {
+    padding-left: 42px;
+}
+
+.search-section input:focus,
+.search-section select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.search-section select {
+    min-width: 150px;
+    flex: 0 1 auto;
+    cursor: pointer;
+}
+
+.table-container {
+    overflow-x: auto;
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 5px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead {
+    background: rgba(102, 126, 234, 0.08);
+}
+
+th {
+    padding: 14px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--border-color);
+    font-size: 0.9em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+td {
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+    font-size: 0.95em;
+}
+
+tbody tr { transition: background 0.2s; }
+tbody tr:hover { background: rgba(102, 126, 234, 0.05); }
+tbody tr:last-child td { border-bottom: none; }
+
+.action-buttons {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+}
+
+.empty-state .icon {
+    font-size: 4em;
+    margin-bottom: 15px;
+    color: #ccc;
+}
+
+.empty-state h3 {
+    color: var(--text-color);
+    margin-bottom: 8px;
+}
+
+@media (max-width: 768px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .search-section { flex-direction: column; }
+    .search-section select { width: 100%; }
+    .action-bar { flex-direction: column; }
+    .action-bar .btn { width: 100%; }
+    th, td { padding: 10px 8px; font-size: 0.85em; }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function filterTable() {
+    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+    const statusFilter = document.getElementById('statusFilter').value;
+    const dateFilter = document.getElementById('dateFilter').value;
+    const rows = document.querySelectorAll('#diagnosisTable tbody tr');
+    
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - 7);
+    const monthStart = new Date(today);
+    monthStart.setMonth(monthStart.getMonth() - 1);
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        const status = row.querySelector('.status-badge')?.textContent.toLowerCase() || '';
+        const dateStr = row.querySelector('.date-cell')?.textContent || '';
+        const date = new Date(dateStr.split(' ')[0]);
+        
+        let show = true;
+        
+        if (searchTerm && !text.includes(searchTerm)) show = false;
+        if (statusFilter !== 'all' && status !== statusFilter) show = false;
+        
+        if (dateFilter !== 'all') {
+            if (dateFilter === 'today' && date < today) show = false;
+            if (dateFilter === 'week' && date < weekStart) show = false;
+            if (dateFilter === 'month' && date < monthStart) show = false;
+        }
+        
+        row.style.display = show ? '' : 'none';
+    });
+}
+
+function deleteDiagnosis(id) {
+    if (!confirm('Delete diagnosis #' + id + '?')) return;
+    
+    fetch('/api/diagnosis/' + id, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Diagnosis #' + id + ' deleted', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+
+function clearAllHistory() {
+    if (!confirm('Are you sure you want to clear ALL diagnosis history? This cannot be undone!')) return;
+    
+    fetch('/api/clear_history', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('All history cleared', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+
+function generateSampleData() {
+    if (!confirm('Generate 5 sample diagnoses for testing?')) return;
+    
+    fetch('/api/seed_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 5 })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast(data.message, 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+</script>
+{% endblock %}

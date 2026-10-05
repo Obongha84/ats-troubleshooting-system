@@ -1,0 +1,690 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - ATS{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <h1><i class="fas fa-user-circle"></i> Profile Settings</h1>
+    <p style="color: #666; margin-top: 5px;">
+        Manage your account, alerts, and scheduled scans
+    </p>
+</div>
+
+<div class="profile-grid">
+    <!-- Account Information -->
+    <div class="profile-card">
+        <h3>
+            <i class="fas fa-id-card"></i> Account Information
+        </h3>
+        <div class="info-list">
+            <div class="info-row">
+                <span class="label">
+                    <i class="fas fa-user"></i> Username
+                </span>
+                <span class="value">{{ user.username }}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">
+                    <i class="fas fa-envelope"></i> Email
+                </span>
+                <span class="value">{{ user.email }}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">
+                    <i class="fas fa-calendar-alt"></i> Member Since
+                </span>
+                <span class="value">{{ user.created_at.strftime('%Y-%m-%d') }}</span>
+            </div>
+            <div class="info-row">
+                <span class="label">
+                    <i class="fas fa-clock"></i> Last Login
+                </span>
+                <span class="value">
+                    {{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else 'First time' }}
+                </span>
+            </div>
+            {% if user.is_admin %}
+            <div class="info-row">
+                <span class="label">
+                    <i class="fas fa-shield-alt"></i> Role
+                </span>
+                <span class="value">
+                    <span class="badge-admin">Administrator</span>
+                </span>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Email Alerts -->
+    <div class="profile-card">
+        <h3>
+            <i class="fas fa-bell"></i> Email Alerts
+        </h3>
+        <p class="card-description">
+            Receive email notifications when critical or warning issues are detected during diagnostic scans.
+        </p>
+        
+        <div class="toggle-row">
+            <label class="switch">
+                <input type="checkbox" id="emailAlerts" 
+                       {% if user.alert_email %}checked{% endif %} 
+                       onchange="toggleEmailAlerts()">
+                <span class="slider"></span>
+            </label>
+            <div class="toggle-label">
+                <strong id="alertStatus">
+                    {{ 'Enabled' if user.alert_email else 'Disabled' }}
+                </strong>
+                <span class="hint">
+                    {% if user.alert_email %}
+                    You will be notified of critical system issues
+                    {% else %}
+                    You will not receive any email notifications
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <div class="info-note">
+            <i class="fas fa-info-circle"></i>
+            <span>Alerts are sent for Warning and Critical status only.</span>
+        </div>
+    </div>
+
+    <!-- Scheduled Scans -->
+    <div class="profile-card">
+        <h3>
+            <i class="fas fa-clock"></i> Scheduled Scans
+        </h3>
+        <p class="card-description">
+            Automatically run diagnostic scans at regular intervals without manual intervention.
+        </p>
+        
+        <div class="schedule-form">
+            <label for="intervalSelect">
+                <i class="fas fa-hourglass-half"></i> Scan Interval
+            </label>
+            <select id="intervalSelect">
+                <option value="1" {% if schedule and schedule.interval_hours == 1 %}selected{% endif %}>
+                    Every 1 hour
+                </option>
+                <option value="6" {% if schedule and schedule.interval_hours == 6 %}selected{% endif %}>
+                    Every 6 hours
+                </option>
+                <option value="12" {% if schedule and schedule.interval_hours == 12 %}selected{% endif %}>
+                    Every 12 hours
+                </option>
+                <option value="24" {% if not schedule or schedule.interval_hours == 24 %}selected{% endif %}>
+                    Every 24 hours (Daily)
+                </option>
+                <option value="48" {% if schedule and schedule.interval_hours == 48 %}selected{% endif %}>
+                    Every 2 days
+                </option>
+                <option value="168" {% if schedule and schedule.interval_hours == 168 %}selected{% endif %}>
+                    Every week
+                </option>
+            </select>
+            
+            <div class="button-row">
+                <button class="btn btn-primary" onclick="saveSchedule()">
+                    <i class="fas fa-save"></i> Save Schedule
+                </button>
+                {% if schedule %}
+                <button class="btn btn-danger" onclick="removeSchedule()">
+                    <i class="fas fa-trash"></i> Remove
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        
+        {% if schedule %}
+        <div class="schedule-info">
+            <div class="schedule-status">
+                <i class="fas fa-check-circle"></i>
+                <span>Active Schedule</span>
+            </div>
+            <div class="schedule-details">
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <i class="fas fa-redo"></i> Frequency:
+                    </span>
+                    <span class="detail-value">Every {{ schedule.interval_hours }} hours</span>
+                </div>
+                {% if schedule.next_run %}
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <i class="fas fa-forward"></i> Next Run:
+                    </span>
+                    <span class="detail-value">{{ schedule.next_run.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
+                {% endif %}
+                {% if schedule.last_run %}
+                <div class="detail-row">
+                    <span class="detail-label">
+                        <i class="fas fa-history"></i> Last Run:
+                    </span>
+                    <span class="detail-value">{{ schedule.last_run.strftime('%Y-%m-%d %H:%M') }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="info-note">
+            <i class="fas fa-info-circle"></i>
+            <span>No schedule configured. Select an interval and click Save.</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- System Statistics -->
+    <div class="profile-card">
+        <h3>
+            <i class="fas fa-chart-pie"></i> Your Activity
+        </h3>
+        <div class="activity-grid">
+            <div class="activity-item">
+                <div class="activity-icon total">
+                    <i class="fas fa-database"></i>
+                </div>
+                <div class="activity-info">
+                    <div class="activity-number">{{ stats.total }}</div>
+                    <div class="activity-label">Total Scans</div>
+                </div>
+            </div>
+            <div class="activity-item">
+                <div class="activity-icon healthy">
+                    <i class="fas fa-check-circle"></i>
+                </div>
+                <div class="activity-info">
+                    <div class="activity-number">{{ stats.healthy }}</div>
+                    <div class="activity-label">Healthy</div>
+                </div>
+            </div>
+            <div class="activity-item">
+                <div class="activity-icon warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <div class="activity-info">
+                    <div class="activity-number">{{ stats.warning }}</div>
+                    <div class="activity-label">Warnings</div>
+                </div>
+            </div>
+            <div class="activity-item">
+                <div class="activity-icon critical">
+                    <i class="fas fa-times-circle"></i>
+                </div>
+                <div class="activity-info">
+                    <div class="activity-number">{{ stats.critical }}</div>
+                    <div class="activity-label">Critical</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.profile-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+    gap: 25px;
+    margin-top: 20px;
+}
+
+.profile-card {
+    background: var(--card-bg);
+    padding: 28px;
+    border-radius: 15px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease;
+}
+
+.profile-card:hover {
+    box-shadow: 0 6px 25px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.profile-card h3 {
+    color: var(--text-color);
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border-color);
+    font-size: 1.15em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.profile-card h3 i {
+    color: var(--primary);
+    font-size: 1.1em;
+}
+
+.card-description {
+    color: #666;
+    font-size: 0.9em;
+    line-height: 1.5;
+    margin-bottom: 18px;
+}
+
+/* Info List */
+.info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+.info-row .label {
+    color: #666;
+    font-weight: 500;
+    font-size: 0.92em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.info-row .label i {
+    color: var(--primary);
+    width: 16px;
+    text-align: center;
+    font-size: 0.9em;
+}
+
+.info-row .value {
+    color: var(--text-color);
+    font-weight: 500;
+    text-align: right;
+    font-size: 0.95em;
+    word-break: break-word;
+}
+
+.badge-admin {
+    background: var(--primary);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Toggle Switch */
+.toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-top: 8px;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 10px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 58px;
+    height: 32px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 24px;
+    width: 24px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.switch input:checked + .slider {
+    background-color: var(--primary);
+}
+
+.switch input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+.toggle-label {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.toggle-label strong {
+    color: var(--text-color);
+    font-size: 1em;
+}
+
+.toggle-label .hint {
+    color: #999;
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+/* Schedule Form */
+.schedule-form {
+    margin-top: 10px;
+}
+
+.schedule-form label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-color);
+    margin-bottom: 10px;
+    font-weight: 500;
+    font-size: 0.95em;
+}
+
+.schedule-form label i {
+    color: var(--primary);
+}
+
+.schedule-form select {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 14px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    cursor: pointer;
+    transition: border-color 0.3s;
+}
+
+.schedule-form select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.button-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
+.button-row .btn {
+    flex: 1;
+    min-width: 130px;
+}
+
+/* Schedule Info Box */
+.schedule-info {
+    margin-top: 20px;
+    padding: 18px;
+    background: linear-gradient(135deg, rgba(39, 174, 96, 0.08), rgba(46, 204, 113, 0.08));
+    border-radius: 12px;
+    border-left: 4px solid #27ae60;
+}
+
+.schedule-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #27ae60;
+    font-weight: 600;
+    margin-bottom: 12px;
+    font-size: 1em;
+}
+
+.schedule-status i {
+    font-size: 1.1em;
+}
+
+.schedule-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 0.9em;
+    flex-wrap: wrap;
+}
+
+.detail-label {
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.detail-label i {
+    color: #27ae60;
+    font-size: 0.85em;
+    width: 14px;
+    text-align: center;
+}
+
+.detail-value {
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+/* Info Note */
+.info-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 15px;
+    background: rgba(102, 126, 234, 0.08);
+    border-radius: 10px;
+    margin-top: 15px;
+    border-left: 3px solid var(--primary);
+    font-size: 0.85em;
+    color: #666;
+    line-height: 1.5;
+}
+
+.info-note i {
+    color: var(--primary);
+    font-size: 1em;
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+/* Activity Grid */
+.activity-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+    margin-top: 10px;
+}
+
+.activity-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    background: var(--bg-color);
+    border-radius: 10px;
+    transition: all 0.3s;
+}
+
+.activity-item:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+}
+
+.activity-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3em;
+    flex-shrink: 0;
+}
+
+.activity-icon.total {
+    background: rgba(102, 126, 234, 0.15);
+    color: var(--primary);
+}
+
+.activity-icon.healthy {
+    background: rgba(39, 174, 96, 0.15);
+    color: #27ae60;
+}
+
+.activity-icon.warning {
+    background: rgba(243, 156, 18, 0.15);
+    color: #f39c12;
+}
+
+.activity-icon.critical {
+    background: rgba(231, 76, 60, 0.15);
+    color: #e74c3c;
+}
+
+.activity-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.activity-number {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: var(--text-color);
+    line-height: 1;
+}
+
+.activity-label {
+    font-size: 0.78em;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .profile-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .activity-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .info-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .info-row .value {
+        text-align: left;
+    }
+    
+    .button-row .btn {
+        min-width: auto;
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function toggleEmailAlerts() {
+    const enabled = document.getElementById('emailAlerts').checked;
+    
+    fetch('/api/user/update_email_alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: enabled })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            document.getElementById('alertStatus').textContent = enabled ? 'Enabled' : 'Disabled';
+            showToast(
+                enabled ? 'Email alerts enabled' : 'Email alerts disabled',
+                enabled ? 'success' : 'warning'
+            );
+        } else {
+            showToast('Failed to update settings', 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+
+function saveSchedule() {
+    const hours = document.getElementById('intervalSelect').value;
+    
+    fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval_hours: parseInt(hours) })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Schedule saved successfully!', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+
+function removeSchedule() {
+    if (!confirm('Are you sure you want to remove the scheduled scans?')) return;
+    
+    fetch('/api/schedule', { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Schedule removed', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+</script>
+{% endblock %}

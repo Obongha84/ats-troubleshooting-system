@@ -1,0 +1,510 @@
+{% extends "base.html" %}
+
+{% block title %}Home - ATS{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 30px;">
+    <h1><i class="fas fa-tools"></i> ATS Troubleshooting System</h1>
+    <p style="color: #666; margin-top: 5px; font-size: 1.05em;">
+        A comprehensive diagnostic and repair tool &mdash; 
+    </p>
+</div>
+
+<!-- System Status Card -->
+<div class="status-card success" id="statusCard">
+    <h3><i class="fas fa-check-circle" style="color: #27ae60;"></i> System Status</h3>
+    <p>Your Troubleshooting System is running successfully!</p>
+</div>
+
+<!-- Feature Grid -->
+<div class="feature-grid">
+    <div class="feature-item">
+        <div class="icon"><i class="fas fa-search"></i></div>
+        <h4>System Scan</h4>
+        <p>Comprehensive system diagnostics</p>
+    </div>
+    <div class="feature-item">
+        <div class="icon"><i class="fas fa-wrench"></i></div>
+        <h4>Auto-Repair</h4>
+        <p>Automated fix for common issues</p>
+    </div>
+    <div class="feature-item">
+        <div class="icon"><i class="fas fa-chart-bar"></i></div>
+        <h4>Performance</h4>
+        <p>Real-time system monitoring</p>
+    </div>
+    <div class="feature-item">
+        <div class="icon"><i class="fas fa-shield-alt"></i></div>
+        <h4>Security</h4>
+        <p>Vulnerability assessment</p>
+    </div>
+</div>
+
+<!-- Action Buttons -->
+<div class="btn-group">
+    <button class="btn btn-primary" id="runBtn" onclick="runDiagnostics()">
+        <i class="fas fa-play"></i> Run Diagnostics
+    </button>
+    <button class="btn btn-success" id="seedBtn" onclick="generateSampleData()">
+        <i class="fas fa-database"></i> Generate Sample Data
+    </button>
+</div>
+
+<!-- Status Message -->
+<div id="statusMessage"></div>
+
+<!-- Stats Summary -->
+<div class="stats-summary">
+    <div class="stat-box total">
+        <div class="stat-number">{{ stats.total }}</div>
+        <div class="stat-label">Total Scans</div>
+    </div>
+    <div class="stat-box healthy">
+        <div class="stat-number">{{ stats.healthy }}</div>
+        <div class="stat-label">Healthy</div>
+    </div>
+    <div class="stat-box warning">
+        <div class="stat-number">{{ stats.warning }}</div>
+        <div class="stat-label">Warnings</div>
+    </div>
+    <div class="stat-box critical">
+        <div class="stat-number">{{ stats.critical }}</div>
+        <div class="stat-label">Critical</div>
+    </div>
+</div>
+
+<!-- Recent Diagnoses -->
+<div class="recent-section">
+    <div class="recent-header">
+        <h3><i class="fas fa-history"></i> Recent Diagnoses</h3>
+        <a href="/history">View All &rarr;</a>
+    </div>
+    
+    <div id="recentDiagnoses">
+        {% if recent_diagnoses %}
+            {% for diagnosis in recent_diagnoses %}
+            <div class="diagnosis-item">
+                <div class="diag-info">
+                    <strong>#{{ diagnosis.id }}</strong>
+                    <span class="diag-time">{{ diagnosis.timestamp.strftime('%Y-%m-%d %H:%M') }}</span>
+                    <span class="status-badge {{ diagnosis.system_status.lower() }}">
+                        {{ diagnosis.system_status }}
+                    </span>
+                    <span class="diag-issues">Issues: {{ diagnosis.issues_found }}</span>
+                </div>
+                <div class="diag-actions">
+                    <a href="/diagnosis/{{ diagnosis.id }}" class="btn btn-primary btn-sm">
+                        <i class="fas fa-eye"></i> View
+                    </a>
+                    <button onclick="deleteDiagnosis({{ diagnosis.id }})" class="btn btn-danger btn-sm">
+                        <i class="fas fa-trash"></i> Delete
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty-state">
+                <div class="icon"><i class="fas fa-search"></i></div>
+                <p>No diagnoses yet. Click "Run Diagnostics" to start!</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Live System Monitor -->
+<div class="monitoring-section">
+    <h3><i class="fas fa-desktop"></i> Live System Monitor</h3>
+    <div class="monitor-grid">
+        <div class="monitor-card">
+            <div class="monitor-label"><i class="fas fa-microchip"></i> CPU Usage</div>
+            <div class="monitor-value" id="live-cpu">--%</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="cpu-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+        <div class="monitor-card">
+            <div class="monitor-label"><i class="fas fa-memory"></i> Memory Usage</div>
+            <div class="monitor-value" id="live-memory">--%</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="memory-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+        <div class="monitor-card">
+            <div class="monitor-label"><i class="fas fa-hdd"></i> Disk Usage</div>
+            <div class="monitor-value" id="live-disk">--%</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="disk-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+        <div class="monitor-card">
+            <div class="monitor-label"><i class="fas fa-thermometer-half"></i> Disk Temp</div>
+            <div class="monitor-value" id="live-temp">--&deg;C</div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="temp-bar" style="width: 0%;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.status-card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 25px;
+    border-left: 4px solid #27ae60;
+    transition: all 0.3s;
+}
+
+.status-card.success { border-left-color: #27ae60; }
+.status-card.warning { border-left-color: #f39c12; }
+.status-card.critical { border-left-color: #e74c3c; }
+.status-card h3 { color: var(--text-color); margin-bottom: 8px; }
+.status-card p { color: #666; line-height: 1.5; }
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+    margin: 30px 0;
+}
+
+.feature-item {
+    background: var(--card-bg);
+    padding: 25px 20px;
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.3s;
+    border: 2px solid transparent;
+}
+
+.feature-item:hover {
+    transform: translateY(-5px);
+    border-color: var(--primary);
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.15);
+}
+
+.feature-item .icon {
+    font-size: 2.5em;
+    margin-bottom: 12px;
+    color: var(--primary);
+}
+
+.feature-item h4 { color: var(--text-color); margin-bottom: 8px; font-size: 1.05em; }
+.feature-item p { color: #666; font-size: 0.9em; line-height: 1.4; }
+
+.btn-group {
+    display: flex;
+    gap: 15px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 30px 0;
+}
+
+#statusMessage {
+    text-align: center;
+    margin: 20px 0;
+    padding: 0;
+    border-radius: 10px;
+    display: none;
+}
+
+#statusMessage.success { display: block; background: #d4edda; color: #155724; padding: 15px; border: 1px solid #c3e6cb; }
+#statusMessage.error { display: block; background: #f8d7da; color: #721c24; padding: 15px; border: 1px solid #f5c6cb; }
+#statusMessage.loading { display: block; background: #cce5ff; color: #004085; padding: 15px; border: 1px solid #b8daff; }
+
+.loading-spinner {
+    display: inline-block;
+    width: 18px;
+    height: 18px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.stats-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 15px;
+    margin: 25px 0;
+}
+
+.stat-box {
+    background: var(--card-bg);
+    padding: 18px;
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.3s;
+    border-top: 3px solid var(--primary);
+}
+
+.stat-box:hover { transform: scale(1.03); box-shadow: 0 5px 20px rgba(0,0,0,0.1); }
+.stat-box .stat-number { font-weight: bold; font-size: 1.8em; color: var(--text-color); margin-bottom: 3px; }
+.stat-box .stat-label { font-size: 0.8em; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.stat-box.healthy { border-top-color: #27ae60; }
+.stat-box.healthy .stat-number { color: #27ae60; }
+.stat-box.warning { border-top-color: #f39c12; }
+.stat-box.warning .stat-number { color: #f39c12; }
+.stat-box.critical { border-top-color: #e74c3c; }
+.stat-box.critical .stat-number { color: #e74c3c; }
+.stat-box.total .stat-number { color: var(--primary); }
+
+.recent-section {
+    margin-top: 40px;
+    padding-top: 25px;
+    border-top: 2px solid var(--border-color);
+}
+
+.recent-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.recent-header h3 { color: var(--text-color); margin: 0; }
+.recent-header a { color: var(--primary); text-decoration: none; font-weight: 600; transition: color 0.3s; }
+.recent-header a:hover { color: var(--primary-dark); text-decoration: underline; }
+
+.diagnosis-item {
+    background: var(--card-bg);
+    padding: 15px 20px;
+    border-radius: 10px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+    border-left: 4px solid var(--primary);
+    transition: all 0.3s;
+}
+
+.diagnosis-item:hover { transform: translateX(5px); box-shadow: 0 3px 15px rgba(0,0,0,0.08); }
+.diag-info { display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+.diag-info strong { color: var(--primary); font-size: 1.1em; }
+.diag-time { color: #666; font-size: 0.9em; }
+.diag-issues { color: #666; font-size: 0.9em; }
+.diag-actions { display: flex; gap: 8px; }
+
+.empty-state { text-align: center; padding: 40px 20px; color: #999; }
+.empty-state .icon { font-size: 3.5em; margin-bottom: 10px; opacity: 0.5; color: #ccc; }
+
+.monitoring-section {
+    margin-top: 40px;
+    padding-top: 25px;
+    border-top: 2px solid var(--border-color);
+}
+
+.monitoring-section h3 { color: var(--text-color); margin-bottom: 20px; }
+
+.monitor-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 20px;
+}
+
+.monitor-card {
+    background: var(--card-bg);
+    padding: 20px;
+    border-radius: 12px;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.monitor-card:hover { transform: translateY(-3px); box-shadow: 0 5px 20px rgba(0,0,0,0.08); }
+.monitor-label { color: #666; font-size: 0.9em; margin-bottom: 8px; }
+.monitor-value { font-size: 1.8em; font-weight: bold; color: var(--text-color); margin-bottom: 12px; }
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    transition: width 0.5s ease, background 0.3s;
+    border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+    .feature-grid { grid-template-columns: repeat(2, 1fr); }
+    .stats-summary { grid-template-columns: repeat(2, 1fr); }
+    .monitor-grid { grid-template-columns: repeat(2, 1fr); }
+    .diagnosis-item { flex-direction: column; align-items: stretch; }
+    .diag-actions { justify-content: flex-end; }
+}
+
+@media (max-width: 480px) {
+    .feature-grid { grid-template-columns: 1fr; }
+    .monitor-grid { grid-template-columns: 1fr; }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function runDiagnostics() {
+    const btn = document.getElementById('runBtn');
+    const msg = document.getElementById('statusMessage');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> Scanning...';
+    
+    msg.className = 'loading';
+    msg.innerHTML = '<span class="loading-spinner"></span> Running diagnostic scan...';
+    
+    fetch('/api/run_diagnostics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            msg.className = 'success';
+            msg.innerHTML = '<i class="fas fa-check-circle"></i> ' + (data.message || 'Diagnostic scan completed!');
+            showToast('Diagnosis created successfully!', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            msg.className = 'error';
+            msg.innerHTML = '<i class="fas fa-times-circle"></i> Error: ' + data.error;
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => {
+        msg.className = 'error';
+        msg.innerHTML = '<i class="fas fa-times-circle"></i> Error: ' + err.message;
+        showToast(err.message, 'error');
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-play"></i> Run Diagnostics';
+    });
+}
+
+function generateSampleData() {
+    if (!confirm('Generate 5 sample diagnoses for testing?')) return;
+    
+    const btn = document.getElementById('seedBtn');
+    const msg = document.getElementById('statusMessage');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading-spinner"></span> Generating...';
+    
+    msg.className = 'loading';
+    msg.innerHTML = '<span class="loading-spinner"></span> Generating sample data...';
+    
+    fetch('/api/seed_data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: 5 })
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            msg.className = 'success';
+            msg.innerHTML = '<i class="fas fa-check-circle"></i> ' + data.message;
+            showToast(data.message, 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        } else {
+            msg.className = 'error';
+            msg.innerHTML = '<i class="fas fa-times-circle"></i> Error: ' + data.error;
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => {
+        msg.className = 'error';
+        msg.innerHTML = '<i class="fas fa-times-circle"></i> Error: ' + err.message;
+    })
+    .finally(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-database"></i> Generate Sample Data';
+    });
+}
+
+function deleteDiagnosis(id) {
+    if (!confirm('Delete diagnosis #' + id + '?')) return;
+    
+    fetch('/api/diagnosis/' + id, { method: 'DELETE' })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Diagnosis #' + id + ' deleted', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            showToast(data.error, 'error');
+        }
+    })
+    .catch(err => showToast(err.message, 'error'));
+}
+
+function updateMonitor() {
+    fetch('/api/system_info')
+        .then(r => r.json())
+        .then(data => {
+            if (data.cpu_percent !== undefined) {
+                updateGauge('cpu', Math.round(data.cpu_percent));
+                updateGauge('memory', Math.round(data.memory.percent));
+                updateGauge('disk', Math.round(data.disk.percent));
+                
+                const temp = data.disk.temperature;
+                document.getElementById('live-temp').textContent = temp + '\u00B0C';
+                const tempPercent = Math.min((temp / 70) * 100, 100);
+                const tempBar = document.getElementById('temp-bar');
+                tempBar.style.width = tempPercent + '%';
+                
+                if (temp > 50) {
+                    tempBar.style.background = '#e74c3c';
+                    document.getElementById('live-temp').style.color = '#e74c3c';
+                } else if (temp > 45) {
+                    tempBar.style.background = '#f39c12';
+                    document.getElementById('live-temp').style.color = '#f39c12';
+                } else {
+                    tempBar.style.background = 'linear-gradient(90deg, #27ae60, #2ecc71)';
+                    document.getElementById('live-temp').style.color = '#27ae60';
+                }
+            }
+        })
+        .catch(err => console.error('Monitor error:', err));
+}
+
+function updateGauge(name, value) {
+    const valueEl = document.getElementById('live-' + name);
+    const barEl = document.getElementById(name + '-bar');
+    
+    valueEl.textContent = value + '%';
+    barEl.style.width = value + '%';
+    
+    if (value > 80) {
+        barEl.style.background = '#e74c3c';
+        valueEl.style.color = '#e74c3c';
+    } else if (value > 60) {
+        barEl.style.background = '#f39c12';
+        valueEl.style.color = '#f39c12';
+    } else {
+        barEl.style.background = 'linear-gradient(90deg, #667eea, #764ba2)';
+        valueEl.style.color = 'var(--text-color)';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    updateMonitor();
+    setInterval(updateMonitor, 3000);
+});
+</script>
+{% endblock %}
