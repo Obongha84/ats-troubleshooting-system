@@ -2,6 +2,18 @@
 ATS - Automated Troubleshooting System
 ========================================
 Main Flask Application (Deployment-Ready)
+
+Features:
+- User Authentication (Multi-user)
+- Password Reset (Forgot Password)
+- Email Alerts
+- Scheduled Auto-Scans
+- Disk Temperature Monitoring
+- Rule-based Chatbot
+- Multi-Drive Detection (HDD/SSD/USB)
+- Health Score (0-100)
+- Diagnoses Comparison
+- Auto-Repair Actions
 """
 
 # ============================================================
@@ -19,6 +31,7 @@ from flask_login import (
 from flask_mail import Mail, Message
 from apscheduler.schedulers.background import BackgroundScheduler
 from werkzeug.security import generate_password_hash, check_password_hash
+from itsdangerous import URLSafeTimedSerializer, SignatureExpired, BadSignature
 from datetime import datetime, timedelta
 from io import BytesIO
 from reportlab.lib import colors
@@ -1109,6 +1122,125 @@ def send_alert_email(user_id, diagnosis):
 
 
 # ============================================================
+# PASSWORD RESET HELPERS
+# ============================================================
+
+def generate_reset_token(user_id):
+    """Generate a secure, time-limited token for password reset"""
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps({'user_id': user_id}, salt='password-reset')
+
+
+def verify_reset_token(token, max_age=3600):
+    """
+    Verify a reset token.
+    Returns user_id if valid, None if expired or invalid.
+    max_age is in seconds (default: 1 hour)
+    """
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        data = serializer.loads(token, salt='password-reset', max_age=max_age)
+        return data.get('user_id')
+    except SignatureExpired:
+        return None  # Token expired
+    except BadSignature:
+        return None  # Token tampered with
+
+
+def send_password_reset_email(user, token):
+    """Send the password reset email"""
+    try:
+        # Build the reset URL
+        reset_url = url_for('reset_password', token=token, _external=True)
+
+        subject = "ATS - Password Reset Request"
+
+        html_body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; background: #f8f9fa; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: white; 
+                        border-radius: 10px; overflow: hidden; 
+                        box-shadow: 0 5px 20px rgba(0,0,0,0.1);">
+                
+                <div style="background: linear-gradient(135deg, #667eea, #764ba2); 
+                            padding: 30px; text-align: center; color: white;">
+                    <h1 style="margin: 0;">ATS</h1>
+                    <p style="margin: 5px 0 0 0; opacity: 0.9;">
+                        Automated Troubleshooting System
+                    </p>
+                </div>
+                
+                <div style="padding: 30px;">
+                    <h2 style="color: #333;">Password Reset Request</h2>
+                    <p style="color: #555; line-height: 1.6;">
+                        Hello <strong>{user.username}</strong>,
+                    </p>
+                    <p style="color: #555; line-height: 1.6;">
+                        We received a request to reset the password for your ATS account. 
+                        If you did not make this request, you can safely ignore this email.
+                    </p>
+                    <p style="color: #555; line-height: 1.6;">
+                        To reset your password, click the button below. 
+                        <strong>This link expires in 1 hour.</strong>
+                    </p>
+                    
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{reset_url}" 
+                           style="display: inline-block; background: #667eea; 
+                                  color: white; padding: 14px 32px; 
+                                  text-decoration: none; border-radius: 8px; 
+                                  font-weight: 600; font-size: 16px;">
+                            Reset My Password
+                        </a>
+                    </div>
+                    
+                    <p style="color: #999; font-size: 0.85em; line-height: 1.5;">
+                        If the button doesn't work, copy and paste this link into your browser:
+                    </p>
+                    <p style="color: #667eea; font-size: 0.8em; 
+                              word-break: break-all; background: #f8f9fa; 
+                              padding: 10px; border-radius: 5px;">
+                        {reset_url}
+                    </p>
+                    
+                    <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
+                    
+                    <p style="color: #999; font-size: 0.8em;">
+                        This is an automated message from ATS. Please do not reply.
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        text_body = f"""
+Hello {user.username},
+
+You requested a password reset for your ATS account.
+
+Click this link to reset your password (expires in 1 hour):
+{reset_url}
+
+If you did not request this, ignore this email.
+"""
+
+        msg = Message(
+            subject=subject,
+            recipients=[user.email],
+            html=html_body,
+            body=text_body
+        )
+        mail.send(msg)
+        print(f"[ATS] Password reset email sent to {user.email}")
+        return True
+
+    except Exception as e:
+        print(f"[ATS] Error sending reset email: {e}")
+        return False
+
+
+# ============================================================
 # SCHEDULED SCANS
 # ============================================================
 
@@ -1213,6 +1345,81 @@ def logout():
     logout_user()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
+
+
+# ============================================================
+# PASSWORD RESET ROUTES
+# ============================================================
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    """Request password reset page"""
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+
+        if not email:
+            flash('Please enter your email address', 'error')
+        else:
+            user = User.query.filter_by(email=email).first()
+
+            if user:
+                token = generate_reset_token(user.id)
+                sent = send_password_reset_email(user, token)
+
+                if not sent and not app.config['MAIL_USERNAME']:
+                    flash('Email service is not configured. Please contact the administrator.', 'warning')
+                    return render_template('forgot_password.html')
+            else:
+                time.sleep(0.5)
+
+            flash(
+                'If that email is registered with us, you will receive a password reset link shortly. '
+                'Please check your inbox and spam folder.',
+                'info'
+            )
+            return redirect(url_for('login'))
+
+    return render_template('forgot_password.html')
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    """Reset password using token from email"""
+    if current_user.is_authenticated:
+        return redirect(url_for('home'))
+
+    user_id = verify_reset_token(token)
+
+    if not user_id:
+        flash('The password reset link is invalid or has expired. Please request a new one.', 'error')
+        return redirect(url_for('forgot_password'))
+
+    user = User.query.get(user_id)
+    if not user:
+        flash('User account not found.', 'error')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+
+        if not password or not confirm:
+            flash('Please fill in both password fields', 'error')
+        elif password != confirm:
+            flash('Passwords do not match', 'error')
+        elif len(password) < 6:
+            flash('Password must be at least 6 characters', 'error')
+        else:
+            user.set_password(password)
+            db.session.commit()
+
+            flash('Your password has been reset successfully. Please log in with your new password.', 'success')
+            return redirect(url_for('login'))
+
+    return render_template('reset_password.html', token=token, username=user.username)
 
 
 # ============================================================
@@ -2008,6 +2215,29 @@ Our system detects **ALL connected drives** - not just C: drive.
 **This is a major improvement over HDD Sentinel** which only monitors internal drives.""",
         'quick_replies': ['Go to drives', 'What is SMART?']
     },
+    'forgot_password': {
+        'keywords': ['forgot password', 'reset password', 'password reset', 'cant login', 'cannot login', 'recover password', 'lost password'],
+        'response': """**Forgot Your Password?**
+
+No problem - you can reset it easily:
+
+**Step 1:** Go to the login page
+
+**Step 2:** Click the **"Forgot Password?"** link
+
+**Step 3:** Enter your registered email address
+
+**Step 4:** Check your inbox for a reset link
+  - The link expires in **1 hour**
+  - Check your spam folder if you don't see it
+
+**Step 5:** Click the link and set a new password
+
+**Step 6:** Log in with your new password
+
+**Note:** If you don't receive the email, the address may not be registered.""",
+        'quick_replies': ['Go to login', 'How do I register?']
+    },
     'status': {
         'keywords': ['status', 'my status', 'current status', 'how is my system'],
         'response': '__DYNAMIC_STATUS__',
@@ -2025,6 +2255,10 @@ Our system detects **ALL connected drives** - not just C: drive.
 **Performance:**
   - High CPU fixes
   - High Memory fixes
+
+**Account:**
+  - Forgot password
+  - Register / Login
 
 **ATS Features:**
   - Schedule scans, email alerts
@@ -2464,6 +2698,7 @@ if __name__ == '__main__':
     print("=" * 60)
     print("\nFeatures Enabled:")
     print("   - User Authentication (Multi-user)")
+    print("   - Password Reset (Forgot Password)")
     print("   - Email Alerts")
     print("   - Scheduled Auto-Scans")
     print("   - Disk Temperature Monitoring")
