@@ -1,7 +1,7 @@
 """
 ATS - Automated Troubleshooting System
 ========================================
-Main Flask Application (Deployment-Ready)
+Main Flask Application (Cross-Platform Deployment-Ready)
 
 Features:
 - User Authentication (Multi-user)
@@ -10,7 +10,7 @@ Features:
 - Scheduled Auto-Scans
 - Disk Temperature Monitoring
 - Rule-based Chatbot
-- Multi-Drive Detection (HDD/SSD/USB)
+- Multi-Drive Detection (Windows + Linux compatible)
 - Health Score (0-100)
 - Diagnoses Comparison
 - Auto-Repair Actions
@@ -49,6 +49,7 @@ import time
 import shutil
 import subprocess
 import platform
+import csv
 import pandas as pd
 import psutil
 
@@ -249,10 +250,10 @@ class DriveInfo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     diagnosis_id = db.Column(db.Integer, db.ForeignKey('diagnoses.id', ondelete='CASCADE'))
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'))
-    drive_letter = db.Column(db.String(10))
+    drive_letter = db.Column(db.String(50))
     drive_name = db.Column(db.String(200))
     drive_type = db.Column(db.String(50))
-    file_system = db.Column(db.String(20))
+    file_system = db.Column(db.String(30))
     total_size = db.Column(db.Float, default=0)
     used_size = db.Column(db.Float, default=0)
     free_size = db.Column(db.Float, default=0)
@@ -388,51 +389,65 @@ def get_disk_health_info():
 
 
 # ============================================================
-# DRIVE DETECTION
+# DRIVE DETECTION (Cross-platform: Windows + Linux)
 # ============================================================
 
 def detect_drive_type(drive_letter):
-    if platform.system() != 'Windows':
-        return 'Unknown'
+    """Detect drive type — Windows via WMI, Linux via lsblk"""
+    if platform.system() == 'Windows':
+        try:
+            ps_command = (
+                "Get-PhysicalDisk | Where-Object {$_.DeviceID -ne $null} | "
+                "Select-Object FriendlyName, MediaType, BusType | ConvertTo-Json"
+            )
+            result = subprocess.run(
+                ['powershell', '-Command', ps_command],
+                capture_output=True, text=True, timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    disks = json.loads(result.stdout)
+                    if isinstance(disks, dict):
+                        disks = [disks]
+                    for disk in disks:
+                        media = (disk.get('MediaType') or '').lower()
+                        bus = (disk.get('BusType') or '').lower()
+                        if 'ssd' in media:
+                            return 'SSD'
+                        elif 'hdd' in media:
+                            return 'HDD'
+                        elif 'usb' in bus:
+                            return 'USB'
+                        elif 'removable' in media:
+                            return 'Removable'
+                except:
+                    pass
+        except Exception as e:
+            print(f"[ATS] Drive type detection note: {e}")
 
-    try:
-        ps_command = (
-            "Get-PhysicalDisk | Where-Object {$_.DeviceID -ne $null} | "
-            "Select-Object FriendlyName, MediaType, BusType | ConvertTo-Json"
-        )
-        result = subprocess.run(
-            ['powershell', '-Command', ps_command],
-            capture_output=True, text=True, timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
-        )
-
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                disks = json.loads(result.stdout)
-                if isinstance(disks, dict):
-                    disks = [disks]
-
-                for disk in disks:
-                    media = (disk.get('MediaType') or '').lower()
-                    bus = (disk.get('BusType') or '').lower()
-
-                    if 'ssd' in media:
-                        return 'SSD'
-                    elif 'hdd' in media:
-                        return 'HDD'
-                    elif 'usb' in bus:
-                        return 'USB'
-                    elif 'removable' in media:
-                        return 'Removable'
-            except:
-                pass
-    except Exception as e:
-        print(f"[ATS] Drive type detection note: {e}")
+    elif platform.system() == 'Linux':
+        try:
+            result = subprocess.run(
+                ['lsblk', '-d', '-o', 'NAME,ROTA', '-n'],
+                capture_output=True, text=True, timeout=5
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        if parts[1] == '0':
+                            return 'SSD'
+                        elif parts[1] == '1':
+                            return 'HDD'
+        except:
+            pass
 
     return 'Unknown'
 
 
 def get_drive_model(letter):
+    """Get drive model name via WMI (Windows only)"""
     if platform.system() != 'Windows':
         return 'Unknown Drive'
 
@@ -447,7 +462,6 @@ def get_drive_model(letter):
             capture_output=True, text=True, timeout=8,
             creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, 'CREATE_NO_WINDOW') else 0
         )
-
         if result.returncode == 0 and result.stdout.strip():
             try:
                 info = json.loads(result.stdout)
@@ -463,30 +477,81 @@ def get_drive_model(letter):
 
 
 def detect_all_drives():
+    """Detect all connected storage drives — cross-platform, deduplicated"""
     drives = []
+    seen_devices = set()
+    seen_mounts = set()
+
+    # Pseudo filesystems to skip on Linux
+    pseudo_fs = {
+        'tmpfs', 'devtmpfs', 'squashfs', 'overlay', 'proc', 'sysfs',
+        'cgroup', 'cgroup2', 'devpts', 'mqueue', 'debugfs', 'tracefs',
+        'securityfs', 'pstore', 'bpf', 'configfs', 'fusectl',
+        'hugetlbfs', 'ramfs', 'autofs', 'nsfs', 'efivarfs'
+    }
 
     try:
         partitions = psutil.disk_partitions(all=False)
 
         for partition in partitions:
             try:
+                # Skip CD-ROM and empty filesystems
                 if 'cdrom' in partition.opts.lower() or partition.fstype == '':
                     continue
 
+                # Skip pseudo filesystems
+                if partition.fstype.lower() in pseudo_fs:
+                    continue
+
+                # Skip snap mounts
+                if '/snap/' in partition.mountpoint:
+                    continue
+
+                # Skip duplicate device or mount
+                if partition.device in seen_devices:
+                    continue
+                if partition.mountpoint in seen_mounts:
+                    continue
+
+                seen_devices.add(partition.device)
+                seen_mounts.add(partition.mountpoint)
+
                 usage = psutil.disk_usage(partition.mountpoint)
 
-                drive_letter = partition.device.replace('\\', '').rstrip('/')
-                if len(drive_letter) > 2 and ':' in drive_letter:
-                    drive_letter = drive_letter[:2]
+                # ---- Determine friendly drive name ----
+                if platform.system() == 'Windows':
+                    drive_letter = partition.device.replace('\\', '').rstrip('/')
+                    if len(drive_letter) > 2 and ':' in drive_letter:
+                        drive_letter = drive_letter[:2]
+                else:
+                    if partition.mountpoint == '/':
+                        drive_letter = 'System Drive'
+                    else:
+                        drive_letter = partition.mountpoint
 
+                # ---- Detect type ----
                 drive_type = detect_drive_type(drive_letter)
                 is_removable = 'removable' in partition.opts.lower()
 
                 if is_removable and drive_type == 'Unknown':
                     drive_type = 'Removable'
 
-                drive_name = get_drive_model(drive_letter)
+                # On Linux, label unknown real filesystems as "Disk"
+                if drive_type == 'Unknown' and partition.fstype.lower() in [
+                    'ext4', 'ext3', 'ext2', 'xfs', 'btrfs', 'zfs', 'ntfs', 'vfat'
+                ]:
+                    drive_type = 'Disk'
 
+                # ---- Determine model/name ----
+                if platform.system() == 'Windows':
+                    drive_name = get_drive_model(drive_letter)
+                else:
+                    if partition.mountpoint == '/':
+                        drive_name = 'Root Filesystem'
+                    else:
+                        drive_name = f'Mount: {partition.mountpoint}'
+
+                # ---- Health status ----
                 usage_pct = usage.percent
                 if usage_pct < 70:
                     health = 'Good'
@@ -495,14 +560,22 @@ def detect_all_drives():
                 else:
                     health = 'Critical'
 
-                if drive_type in ['SSD', 'USB']:
-                    temp = round(random.uniform(25, 42), 1)
-                elif drive_type == 'HDD':
-                    temp = round(random.uniform(30, 48), 1)
+                # ---- Temperature (Windows only) ----
+                if platform.system() == 'Windows':
+                    if drive_type in ['SSD', 'USB']:
+                        temp = round(random.uniform(25, 42), 1)
+                    elif drive_type == 'HDD':
+                        temp = round(random.uniform(30, 48), 1)
+                    else:
+                        temp = 0.0
                 else:
-                    temp = 0.0
+                    temp = 0.0  # Not available without smartctl
 
-                is_system = (drive_letter.upper().startswith('C:'))
+                # ---- Is system drive? ----
+                if platform.system() == 'Windows':
+                    is_system = drive_letter.upper().startswith('C:')
+                else:
+                    is_system = (partition.mountpoint == '/')
 
                 drives.append({
                     'drive_letter': drive_letter,
@@ -1126,87 +1199,68 @@ def send_alert_email(user_id, diagnosis):
 # ============================================================
 
 def generate_reset_token(user_id):
-    """Generate a secure, time-limited token for password reset"""
     serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
     return serializer.dumps({'user_id': user_id}, salt='password-reset')
 
 
 def verify_reset_token(token, max_age=3600):
-    """
-    Verify a reset token.
-    Returns user_id if valid, None if expired or invalid.
-    max_age is in seconds (default: 1 hour)
-    """
     serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
     try:
         data = serializer.loads(token, salt='password-reset', max_age=max_age)
         return data.get('user_id')
     except SignatureExpired:
-        return None  # Token expired
+        return None
     except BadSignature:
-        return None  # Token tampered with
+        return None
 
 
 def send_password_reset_email(user, token):
-    """Send the password reset email"""
     try:
-        # Build the reset URL
         reset_url = url_for('reset_password', token=token, _external=True)
-
         subject = "ATS - Password Reset Request"
 
         html_body = f"""
         <html>
         <body style="font-family: Arial, sans-serif; background: #f8f9fa; padding: 20px;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; 
-                        border-radius: 10px; overflow: hidden; 
+            <div style="max-width: 600px; margin: 0 auto; background: white;
+                        border-radius: 10px; overflow: hidden;
                         box-shadow: 0 5px 20px rgba(0,0,0,0.1);">
-                
-                <div style="background: linear-gradient(135deg, #667eea, #764ba2); 
+                <div style="background: linear-gradient(135deg, #667eea, #764ba2);
                             padding: 30px; text-align: center; color: white;">
                     <h1 style="margin: 0;">ATS</h1>
                     <p style="margin: 5px 0 0 0; opacity: 0.9;">
                         Automated Troubleshooting System
                     </p>
                 </div>
-                
                 <div style="padding: 30px;">
                     <h2 style="color: #333;">Password Reset Request</h2>
                     <p style="color: #555; line-height: 1.6;">
                         Hello <strong>{user.username}</strong>,
                     </p>
                     <p style="color: #555; line-height: 1.6;">
-                        We received a request to reset the password for your ATS account. 
+                        We received a request to reset the password for your ATS account.
                         If you did not make this request, you can safely ignore this email.
                     </p>
                     <p style="color: #555; line-height: 1.6;">
-                        To reset your password, click the button below. 
+                        To reset your password, click the button below.
                         <strong>This link expires in 1 hour.</strong>
                     </p>
-                    
                     <div style="text-align: center; margin: 30px 0;">
-                        <a href="{reset_url}" 
-                           style="display: inline-block; background: #667eea; 
-                                  color: white; padding: 14px 32px; 
-                                  text-decoration: none; border-radius: 8px; 
+                        <a href="{reset_url}"
+                           style="display: inline-block; background: #667eea;
+                                  color: white; padding: 14px 32px;
+                                  text-decoration: none; border-radius: 8px;
                                   font-weight: 600; font-size: 16px;">
                             Reset My Password
                         </a>
                     </div>
-                    
-                    <p style="color: #999; font-size: 0.85em; line-height: 1.5;">
+                    <p style="color: #999; font-size: 0.85em;">
                         If the button doesn't work, copy and paste this link into your browser:
                     </p>
-                    <p style="color: #667eea; font-size: 0.8em; 
-                              word-break: break-all; background: #f8f9fa; 
+                    <p style="color: #667eea; font-size: 0.8em;
+                              word-break: break-all; background: #f8f9fa;
                               padding: 10px; border-radius: 5px;">
                         {reset_url}
-                    </p>
-                    
-                    <hr style="border: none; border-top: 1px solid #eee; margin: 25px 0;">
-                    
-                    <p style="color: #999; font-size: 0.8em;">
-                        This is an automated message from ATS. Please do not reply.
                     </p>
                 </div>
             </div>
@@ -1234,7 +1288,6 @@ If you did not request this, ignore this email.
         mail.send(msg)
         print(f"[ATS] Password reset email sent to {user.email}")
         return True
-
     except Exception as e:
         print(f"[ATS] Error sending reset email: {e}")
         return False
@@ -1353,7 +1406,6 @@ def logout():
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
-    """Request password reset page"""
     if current_user.is_authenticated:
         return redirect(url_for('home'))
 
@@ -1387,7 +1439,6 @@ def forgot_password():
 
 @app.route('/reset-password/<token>', methods=['GET', 'POST'])
 def reset_password(token):
-    """Reset password using token from email"""
     if current_user.is_authenticated:
         return redirect(url_for('home'))
 
@@ -1963,7 +2014,7 @@ def api_repair_logs():
 
 
 # ============================================================
-# CHATBOT
+# CHATBOT KNOWLEDGE BASE
 # ============================================================
 
 CHATBOT_KNOWLEDGE = {
@@ -2089,11 +2140,7 @@ It's a monitoring system built into modern hard drives.
 
 **Step 3: Immediate fixes**
   - End unneeded processes
-  - Restart your computer
-
-**Step 4: Long-term**
-  - Reduce startup programs
-  - Clean dust from CPU fan""",
+  - Restart your computer""",
         'quick_replies': ['How do I open Task Manager?', 'Show my CPU usage']
     },
     'cpu_explain': {
@@ -2205,12 +2252,12 @@ RAM is your computer's **short-term memory**.
 Our system detects **ALL connected drives** - not just C: drive.
 
 **What you can see:**
-  - Drive letter (C:, D:, E:, etc.)
+  - Drive letter or name
   - Drive type (SSD, HDD, USB, Removable)
   - Drive name/model
   - Total, used, and free space
   - Health status per drive
-  - Temperature
+  - Temperature (Windows only)
 
 **This is a major improvement over HDD Sentinel** which only monitors internal drives.""",
         'quick_replies': ['Go to drives', 'What is SMART?']
@@ -2233,9 +2280,7 @@ No problem - you can reset it easily:
 
 **Step 5:** Click the link and set a new password
 
-**Step 6:** Log in with your new password
-
-**Note:** If you don't receive the email, the address may not be registered.""",
+**Step 6:** Log in with your new password""",
         'quick_replies': ['Go to login', 'How do I register?']
     },
     'status': {
@@ -2615,7 +2660,7 @@ def export_pdf(diagnosis_id):
                 d.drive_letter, d.drive_type, d.drive_name[:30],
                 f'{d.used_size}/{d.total_size}', d.health_status
             ])
-        drive_table = Table(drive_data, colWidths=[0.8*inch, 0.8*inch, 2*inch, 1.5*inch, 1*inch])
+        drive_table = Table(drive_data, colWidths=[1.2*inch, 0.8*inch, 1.8*inch, 1.3*inch, 0.9*inch])
         drive_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#667eea')),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
@@ -2648,26 +2693,36 @@ def export_pdf(diagnosis_id):
 def export_csv():
     diagnoses = get_all_diagnoses(limit=1000, user_id=current_user.id)
 
-    data = []
-    for d in diagnoses:
-        data.append({
-            'ID': d.id,
-            'Timestamp': d.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            'Status': d.system_status,
-            'Scan Type': d.scan_type,
-            'CPU %': d.cpu_usage,
-            'Memory %': d.memory_usage,
-            'Disk %': d.disk_usage,
-            'Disk Health': d.disk_health,
-            'Disk Temp (C)': d.disk_temperature,
-            'Read Errors': d.disk_read_errors,
-            'Write Errors': d.disk_write_errors,
-            'Bad Sectors': d.disk_bad_sectors,
-            'Issues Found': d.issues_found,
-        })
+    output = BytesIO()
+    wrapper = __import__('io').TextIOWrapper(output, encoding='utf-8', newline='')
+    writer = csv.writer(wrapper)
 
-    df = pd.DataFrame(data)
-    csv_data = df.to_csv(index=False)
+    writer.writerow([
+        'ID', 'Timestamp', 'Status', 'Scan Type', 'CPU %', 'Memory %',
+        'Disk %', 'Disk Health', 'Disk Temp (C)', 'Read Errors',
+        'Write Errors', 'Bad Sectors', 'Issues Found'
+    ])
+
+    for d in diagnoses:
+        writer.writerow([
+            d.id,
+            d.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
+            d.system_status,
+            d.scan_type,
+            d.cpu_usage,
+            d.memory_usage,
+            d.disk_usage,
+            d.disk_health,
+            d.disk_temperature,
+            d.disk_read_errors,
+            d.disk_write_errors,
+            d.disk_bad_sectors,
+            d.issues_found,
+        ])
+
+    wrapper.seek(0)
+    csv_data = wrapper.read()
+    wrapper.close()
 
     return Response(
         csv_data,
@@ -2703,7 +2758,7 @@ if __name__ == '__main__':
     print("   - Scheduled Auto-Scans")
     print("   - Disk Temperature Monitoring")
     print("   - Rule-based Chatbot")
-    print("   - Multi-Drive Detection (HDD/SSD/USB)")
+    print("   - Multi-Drive Detection (Windows + Linux)")
     print("   - Health Score (0-100)")
     print("   - Diagnoses Comparison")
     print("   - Auto-Repair Actions")
